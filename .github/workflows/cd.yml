@@ -1,0 +1,49 @@
+
+name: CD - Deploy to EC2
+
+on:
+  workflow_run:
+    workflows:
+      - "CI - Build & Push Docker Image"
+    types:
+      - completed
+
+jobs:
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.HOST_DNS }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            IMAGE="${{ secrets.DOCKER_USERNAME }}/myapp"
+            TAG="${{ github.event.workflow_run.head_sha }}"
+
+            # Install Docker and Apache
+            sudo apt-get update -y
+            sudo apt-get install -y docker.io apache2
+
+            # Start and enable Docker and Apache
+            sudo systemctl enable --now docker
+            sudo systemctl enable --now apache2
+
+            # Remove the existing container
+            sudo docker rm -f myapp || true
+
+            # Pull the image built by the CI workflow
+            sudo docker pull "$IMAGE:$TAG"
+
+            # Run the new container
+            sudo docker run -d \
+              --restart always \
+              --name myapp \
+              -p 8080:80 \
+              "$IMAGE:$TAG"
+
+            # Restart Apache
+            sudo systemctl restart apache2
